@@ -37,6 +37,10 @@ public class R50_Retry {
 		//when
 		cloudClient
 				.pricing()
+				.doOnSubscribe(__ -> log.info("Ponowna subskrypcja!"))
+				.doOnError(e -> log.error("Before" + e))
+				.retry(3)
+				.doOnError(e -> log.error("After" + e))
 				.test();
 		
 		//then
@@ -46,6 +50,16 @@ public class R50_Retry {
 	private Flowable<BigDecimal> failure() {
 		return Flowable.error(new RuntimeException("Simulated"));
 	}
-	
-	
+
+	// https://gist.github.com/hzsweers/7902e3a0286774630f4f
+// retries up to 3 times while exponentially backing off with each retry
+//                .retryWhen(errors ->
+//			errors
+//					.zipWith(
+//			Observable.range(1, MAX_RETRIES), (n, i) -> i
+//                                )
+//										.flatMap(
+//			retryCount -> Observable.timer((long) Math.pow(4, retryCount), TimeUnit.SECONDS)
+//			)
+//			)
 }

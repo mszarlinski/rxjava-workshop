@@ -1,5 +1,6 @@
 package com.nurkiewicz.rxjava;
 
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.nurkiewicz.rxjava.util.Sleeper;
 import io.reactivex.Flowable;
 import io.reactivex.Scheduler;
@@ -11,6 +12,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 
 import static java.time.Duration.ofMillis;
 import static java.time.Duration.ofSeconds;
@@ -19,80 +22,98 @@ import static org.awaitility.Awaitility.await;
 
 @Ignore
 public class R10_SubscribeObserveOn {
-	
-	private static final Logger log = LoggerFactory.getLogger(R10_SubscribeObserveOn.class);
-	
-	@Test
-	public void subscribeOn() throws Exception {
-		Flowable<BigDecimal> obs = slowFromCallable();
-		
-		obs
-				.subscribeOn(Schedulers.io())
-				.subscribe(
-						x -> log.info("Got: {}", x)
-				);
-		Sleeper.sleep(ofMillis(1_100));
-	}
-	
-	@Test
-	public void subscribeOnForEach() throws Exception {
-		Flowable<BigDecimal> obs = slowFromCallable();
-		
-		obs
-				.subscribeOn(Schedulers.io())
-				.subscribe(
-						x -> log.info("Got: {}", x)
-				);
-		Sleeper.sleep(ofMillis(1_100));
-	}
-	
-	private Flowable<BigDecimal> slowFromCallable() {
-		return Flowable.fromCallable(() -> {
-			log.info("Starting");
-			Sleeper.sleep(ofSeconds(1));
-			log.info("Done");
-			return BigDecimal.TEN;
-		});
-	}
-	
-	@Test
-	public void observeOn() throws Exception {
-		slowFromCallable()
-				.subscribeOn(Schedulers.io())
-				.doOnNext(x -> log.info("A: {}", x))
-				.observeOn(Schedulers.computation())
-				.doOnNext(x -> log.info("B: {}", x))
-				.observeOn(Schedulers.newThread())
-				.doOnNext(x -> log.info("C: {}", x))
-				.subscribe(
-						x -> log.info("Got: {}", x)
-				);
-		Sleeper.sleep(ofMillis(1_100));
-	}
 
-	/**
-	 * TODO Create CustomExecutor
-	 */
-	@Test
-	public void customExecutor() throws Exception {
-		final TestSubscriber<BigDecimal> subscriber = slowFromCallable()
-				.subscribeOn(myCustomScheduler())
-				.test();
-		await().until(() -> {
-					Thread lastSeenThread = subscriber.lastThread();
-					assertThat(lastSeenThread).isNotNull();
-					assertThat(lastSeenThread.getName()).startsWith("CustomExecutor-");
-				}
-		);
-	}
-	
-	/**
-	 * Hint: Schedulers.from()
-	 * Hint: ThreadFactoryBuilder
-	 */
-	private Scheduler myCustomScheduler() {
-		return Schedulers.io();
-	}
-	
-	
+    private static final Logger log = LoggerFactory.getLogger(R10_SubscribeObserveOn.class);
+
+    @Test
+    public void subscribeOn() throws Exception {
+        Flowable<BigDecimal> obs = slowFromCallable();
+
+        obs
+                .subscribeOn(Schedulers.io()) // Prosimy o 1 watek z innej puli watkow, subscribe() przestal byc synchroniczny
+                .subscribe(
+                        x -> log.info("Got: {}", x),
+                        e -> e.printStackTrace()
+                );
+        Sleeper.sleep(ofMillis(1_100));
+
+//		10:07:08.352 | INFO  | RxCachedThreadScheduler-1 | Starting
+//		10:07:09.355 | INFO  | RxCachedThreadScheduler-1 | Done
+//		10:07:09.356 | INFO  | RxCachedThreadScheduler-1 | Got: 10
+    }
+
+    @Test
+    public void subscribeOnForEach() throws Exception {
+        Flowable<BigDecimal> obs = slowFromCallable();
+
+        obs
+                .subscribeOn(Schedulers.io())
+                .subscribe(
+                        x -> log.info("Got: {}", x)
+                );
+        Sleeper.sleep(ofMillis(1_100));
+    }
+
+    private Flowable<BigDecimal> slowFromCallable() {
+        return Flowable.fromCallable(() -> { // Wyemituje dokladnie 1 zdarzenie w tym samym watku
+            log.info("Starting");
+            Sleeper.sleep(ofSeconds(1));
+            log.info("Done");
+            return BigDecimal.TEN;
+        });
+    }
+
+    @Test
+    public void observeOn() throws Exception {
+        slowFromCallable()
+                .subscribeOn(Schedulers.io()) // Nie jest istotne, w ktorym miejscu sie znajduje, mozna przesunac na dol (zawsze wedruje do gory)
+                // Dotyczy watku, w ktorym robione jest subscribe()
+                .doOnNext(x -> log.info("A: {}", x))
+                .observeOn(Schedulers.computation()) // observeOn() dziala w dol, przekazanie przetwarzania do innej puli
+                .doOnNext(x -> log.info("B: {}", x))
+                .observeOn(Schedulers.newThread())
+                .doOnNext(x -> log.info("C: {}", x))
+                .subscribe(
+                        x -> log.info("Got: {}", x) // Strumienie czytamy od dolu do gory
+                );
+        Sleeper.sleep(ofMillis(1_100));
+    }
+
+    // Schedulers.computation() - tylko obliczenia angazujace CPU, zadnych I/O
+    // Schedulers.io() - moze stworzyc nieskonczona liczbe watkow
+
+    /**
+     * TODO Create CustomExecutor
+     */
+    @Test
+    public void customExecutor() throws Exception {
+        final TestSubscriber<BigDecimal> subscriber = slowFromCallable()
+                .subscribeOn(myCustomScheduler())
+                .test();
+        await().until(() -> {
+                    Thread lastSeenThread = subscriber.lastThread();
+                    assertThat(lastSeenThread).isNotNull();
+                    assertThat(lastSeenThread.getName()).startsWith("CustomExecutor-");
+                }
+        );
+    }
+
+    /**
+     * Hint: Schedulers.from()
+     * Hint: ThreadFactoryBuilder
+     */
+    private Scheduler myCustomScheduler() {
+//		return Schedulers.io();
+        return Schedulers.from(Executors.newFixedThreadPool(
+                10,
+                threadFactory()));
+    }
+
+    private ThreadFactory threadFactory() {
+        return new ThreadFactoryBuilder()
+                .setNameFormat("CustomExecutor-%d")
+                .build();
+    }
+
+
 }

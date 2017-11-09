@@ -12,7 +12,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@Ignore
+//@Ignore
 public class R20_ObservableFromFile {
 	
 	

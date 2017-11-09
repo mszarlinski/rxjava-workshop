@@ -10,7 +10,7 @@ public class CloudClient {
 	
 	public Flowable<BigDecimal> pricing() {
 		return Flowable
-				.timer(30, TimeUnit.SECONDS)
+				.timer(30, TimeUnit.SECONDS) // Interval o jednym zdarzeniu - emituje "0"
 				.flatMap(x -> Flowable.error(new IOException("Service unavailable")));
 	}
 	

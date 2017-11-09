@@ -1,10 +1,13 @@
 package com.nurkiewicz.rxjava;
 
 import com.nurkiewicz.rxjava.util.CloudClient;
+import io.reactivex.Flowable;
 import io.reactivex.schedulers.TestScheduler;
 import io.reactivex.subscribers.TestSubscriber;
 import org.junit.Ignore;
 import org.junit.Test;
+import org.reactivestreams.Publisher;
+import org.reactivestreams.Subscriber;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,11 +37,13 @@ public class R51_TestScheduler {
 		//when
 		final TestSubscriber<BigDecimal> subscriber = cloudClient
 				.pricing()
+				.timeout(3000, TimeUnit.MILLISECONDS, clock, Flowable.just(FALLBACK))
+//				.onErrorReturnItem(FALLBACK)
 				.test();
 		
 		//then
 		subscriber.assertNoValues();
-		subscriber.assertNoErrors();
+		subscriber.assertNoErrors(); // Zawsze sprawdzac assertNoErrors() !!!
 
 		clock.advanceTimeBy(2_999, TimeUnit.MILLISECONDS);
 		subscriber.assertNoValues();

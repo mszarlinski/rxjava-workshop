@@ -1,20 +1,26 @@
 package com.nurkiewicz.rxjava;
 
 import com.google.common.base.MoreObjects;
+import com.nurkiewicz.rxjava.util.Sleeper;
 import io.reactivex.Observable;
 import io.reactivex.Scheduler;
+import io.reactivex.Single;
+import io.reactivex.observables.GroupedObservable;
 import io.reactivex.observers.TestObserver;
 import io.reactivex.schedulers.Schedulers;
 import io.reactivex.schedulers.TestScheduler;
+import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static java.util.stream.Collectors.toList;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -33,6 +39,8 @@ public class R60_GroupBy {
 
 		//when
 		clicks
+				.buffer(1, SECONDS)
+				.map(List::size)
 				.take(5)
 				.blockingSubscribe(x -> log.info("{} clicks/s", x));
 
@@ -50,6 +58,8 @@ public class R60_GroupBy {
 
 		//when
 		clicks
+				.window(1, SECONDS)
+				.flatMapSingle(Observable::count)
 				.take(5)
 				.blockingSubscribe(x -> log.info("{} clicks/s", x));
 
@@ -64,7 +74,8 @@ public class R60_GroupBy {
 
 		//when
 		final TestObserver<Long> subscriber = clicks
-				.map(x -> 0L)  //TODO Use window() to count here
+				.window(1, SECONDS, scheduler)
+				.flatMapSingle(Observable::count)  //TODO Use window() to count here
 				.test();
 
 		//then
@@ -98,9 +109,14 @@ public class R60_GroupBy {
 		Observable<Click> clicks = clicks(Schedulers.io());
 
 		//when
-		clicks
-				.take(1000)
-				.blockingSubscribe(x -> log.info("Total {} clicks from {} country", x));
+        Observable<Pair<Country, Long>> grouped = clicks
+                .take(1000)
+                .groupBy(Click::getCountry)
+                .flatMapSingle(group -> group
+                        .count()
+                        .map(cnt -> Pair.of(group.getKey(), cnt)));
+
+        grouped.blockingSubscribe(x -> log.info("Total {} clicks from {} country", x.getKey(), x.getValue()));
 
 		//then
 	}
@@ -112,8 +128,20 @@ public class R60_GroupBy {
 		Observable<Click> clicks = clicks(Schedulers.io());
 
 		//when
-		List<String> firstStats = clicks
-				.map(x -> x.toString())  //TODO Implement groupBy here
+        Observable<Pair<Country, Observable<Click>>> groups = clicks
+                .groupBy(Click::getCountry)
+                .flatMap(group -> group.window(1, SECONDS)
+                        .map(win -> Pair.of(group.getKey(), win)));
+
+        Observable<String> map = groups
+                .flatMapSingle(p -> p.getValue().count()
+                        .map(cnt -> String.format("%s-%d", p.getKey(), cnt)));
+
+        map.subscribe(x -> System.out.println(x));
+
+        Sleeper.sleep(Duration.ofMinutes(1));
+
+        List<String> firstStats = map
 				.take(3)
 				.toList()
 				.blockingGet()
